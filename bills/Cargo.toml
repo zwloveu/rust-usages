@@ -1,0 +1,12 @@
+[package]
+name = "bills"
+version = "0.1.0"
+edition = "2024"
+default-run = "bills"
+
+[dependencies]
+csv = "1.3.1"
+
+[[bin]]
+name = "delete_first_column_of_input"
+path = "src/bin/delete_first_column_of_input.rs"
