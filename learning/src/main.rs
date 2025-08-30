@@ -23,7 +23,13 @@ pub(crate) fn main() -> Result<(), Box<dyn std::error::Error>> {
         input_buffer.clear();
         let read_bytes = io::stdin().read_line(&mut input_buffer)?;
 
-        let input_num = input_buffer.trim().parse::<usize>()?;
+        let input_num = match input_buffer.trim().parse::<usize>() {
+            Ok(num) => num,
+            Err(_) => {
+                clear_screen();
+                continue;                
+            }
+        };
 
         match (read_bytes, input_num) {
             (2, EXIT_SIGNAL) => {
@@ -35,20 +41,17 @@ pub(crate) fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("Running {}...", features[num - 1].0);
                     func();
                     println!("Finished {}...", features[num - 1].0);
-                    let mut input: String = String::new();
-                    io::stdin().read_line(&mut input)?;
                     println!("Press any key to continue...");
-                }
-                clear_screen();
+                    let mut input: String = String::new();
+                    io::stdin().read_line(&mut input)?;                    
+                }                
             }
 
             _ => {
-                println!(
-                    "Enter the number of the feature to run (1-{}), or 0 to exit:other",
-                    features.len()
-                );
+                continue;
             }
         }
+        clear_screen();
     }
 
     Ok(())
