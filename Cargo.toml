@@ -2,5 +2,5 @@
 resolver = "3"
 members = [
     "bills", 
-    "learnings"
+    "learning"
 ]
