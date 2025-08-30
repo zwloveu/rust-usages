@@ -9,10 +9,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .from_reader(input_file);
 
     // Convert headers to mutable Vec<String> and remove first column
-    let mut headers: Vec<String> = reader.headers()?.iter()
-        .map(|s| s.to_string())
-        .collect();
-    headers.remove(0);  // Now works on Vec
+    let mut headers: Vec<String> = reader.headers()?.iter().map(|s| s.to_string()).collect();
+    headers.remove(0); // Now works on Vec
 
     let mut records = Vec::new();
     for result in reader.records() {
@@ -21,18 +19,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             .iter()
             .map(|s| s.to_string()) // Convert &str to owned String
             .collect();
-        record.remove(0);  // Now works with owned values
+        record.remove(0); // Now works with owned values
         records.push(record);
     }
 
     let output_file = File::create("input.csv")?;
     let mut writer = WriterBuilder::new().from_writer(output_file);
-    
+
     writer.write_record(&headers)?;
     for record in records {
         writer.write_record(&record)?;
     }
-    
+
     writer.flush()?;
     println!("deleted first column of input.csv");
     Ok(())

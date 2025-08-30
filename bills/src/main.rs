@@ -1,5 +1,5 @@
-use csv::{Reader, ReaderBuilder, StringRecord, Writer, WriterBuilder};
 use bills::{Platform, you_know};
+use csv::{Reader, ReaderBuilder, StringRecord, Writer, WriterBuilder};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs::File;

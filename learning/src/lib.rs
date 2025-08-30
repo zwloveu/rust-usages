@@ -3,9 +3,6 @@ use std::{
     sync::{Mutex, MutexGuard, OnceLock},
 };
 
-mod terminal_guard;
-pub use terminal_guard::{Key, read_key};
-
 mod module01_smart_pointers;
 
 static GLOBAL_REGISTRY: OnceLock<Mutex<HashMap<&'static str, fn()>>> = OnceLock::new();

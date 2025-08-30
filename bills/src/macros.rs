@@ -37,7 +37,7 @@ macro_rules! define_platform_enum {
 
             pub fn from_code(code: &str) -> Result<Self, String> {
                 let code_upper = code.to_uppercase();
-                
+
                 match code_upper.as_str() {
                     $(
                         val if val == $code.to_uppercase().as_str() => Ok(Self::$variant(PlatformInfo {
