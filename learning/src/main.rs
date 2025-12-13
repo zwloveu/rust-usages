@@ -52,7 +52,7 @@ pub(crate) fn main() -> Result<(), Box<dyn std::error::Error>> {
                 break;
             }
 
-            num if (1..=features.len()).contains(&num) => {
+            num if num >= 1 && num <= features.len() => {
                 if let Some((_, func)) = features.get(num - 1) {
                     clear_screen();
                     println!("{}...Begin", features[num - 1].0);
