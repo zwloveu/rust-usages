@@ -5,9 +5,9 @@ use std::io::Write;
 pub(crate) fn main() -> Result<(), Box<dyn std::error::Error>> {
     const EXIT_SIGNAL: usize = 0;
 
-    init_features();
+    init_features()?;
 
-    let mut features: Vec<(&'static str, fn())> = get_all_features().into_iter().collect();
+    let mut features: Vec<(&'static str, fn())> = get_all_features()?.into_iter().collect();
     features.sort_by_key(|&(key, _)| key);
 
     let mut input_buffer: String = String::new();

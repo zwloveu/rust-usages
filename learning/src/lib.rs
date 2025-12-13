@@ -11,20 +11,22 @@ pub trait FeatureRegistry {
     fn get_features(&self) -> HashMap<&'static str, fn()>;
 }
 
-pub fn init_features() {
+pub fn init_features() -> Result<(), Box<dyn std::error::Error>> {
     let registry: &Mutex<HashMap<&'static str, fn()>> =
         GLOBAL_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
 
-    let mut features: MutexGuard<'_, HashMap<&'static str, fn()>> = registry.lock().unwrap();
+    let mut features: MutexGuard<'_, HashMap<&'static str, fn()>> = registry.lock()?;
 
     features.extend(
         &module01_smart_pointers::BoxPointerModuleFeatureRegister::default().get_features(),
     );
+
+    Ok(())
 }
 
-pub fn get_all_features() -> HashMap<&'static str, fn()> {
+pub fn get_all_features() -> Result<HashMap<&'static str, fn()>, Box<dyn std::error::Error>> {
     let registry: &Mutex<HashMap<&'static str, fn()>> =
         GLOBAL_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
 
-    registry.lock().unwrap().clone()
+    Ok(registry.lock()?.clone())
 }
