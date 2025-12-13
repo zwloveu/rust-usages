@@ -24,9 +24,10 @@ pub fn init_features() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn get_all_features() -> Result<HashMap<&'static str, fn()>, Box<dyn std::error::Error>> {
+pub fn get_all_features()
+-> Result<MutexGuard<'static, HashMap<&'static str, fn()>>, Box<dyn std::error::Error>> {
     let registry: &Mutex<HashMap<&'static str, fn()>> =
         GLOBAL_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
 
-    Ok(registry.lock()?.clone())
+    Ok(registry.lock()?)
 }

@@ -7,7 +7,11 @@ pub(crate) fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     init_features()?;
 
-    let mut features: Vec<(&'static str, fn())> = get_all_features()?.into_iter().collect();
+    let features_guard = get_all_features()?;
+    let mut features: Vec<(&'static str, fn())> = features_guard
+        .iter()
+        .map(|(k, v)| (*k, *v)) // only copy &str-key and fn(), they are all bit 8
+        .collect();
     features.sort_by_key(|&(key, _)| key);
 
     let mut input_buffer: String = String::new();
