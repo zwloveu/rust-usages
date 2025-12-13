@@ -3,7 +3,8 @@ use std::{
     sync::{Mutex, MutexGuard, OnceLock},
 };
 
-mod module01_smart_pointers;
+mod module02_data_structures;
+mod module09_smart_pointers;
 
 static GLOBAL_REGISTRY: OnceLock<Mutex<HashMap<&'static str, fn()>>> = OnceLock::new();
 
@@ -18,7 +19,11 @@ pub fn init_features() -> Result<(), Box<dyn std::error::Error>> {
     let mut features: MutexGuard<'_, HashMap<&'static str, fn()>> = registry.lock()?;
 
     features.extend(
-        &module01_smart_pointers::BoxPointerModuleFeatureRegister::default().get_features(),
+        &module02_data_structures::DataStructureVecModuleFeatureRegister::default().get_features(),
+    );
+
+    features.extend(
+        &module09_smart_pointers::SmartPointerBoxModuleFeatureRegister::default().get_features(),
     );
 
     Ok(())
