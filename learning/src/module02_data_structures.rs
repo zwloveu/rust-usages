@@ -14,7 +14,7 @@ fn custom_reverse<T: Default>(vec: &mut Vec<T>) {
         let left: &mut T = &mut left_slice[start];
         let right: &mut T = &mut right_slice[0];
 
-        let temp = std::mem::take(left);
+        let temp: T = std::mem::take(left);
         *left = std::mem::take(right);
         *right = temp;
 

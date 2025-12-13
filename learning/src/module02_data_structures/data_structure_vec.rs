@@ -36,6 +36,11 @@ fn demonstrate_vec_basic() {
     println!("custom reverse nums");
     custom_reverse(&mut nums);
     println!("nums of vec: {:?}", nums);
+    println!("remove the last from nums");
+    let _ = nums.pop();
+    println!("nums of vec: {:?}", nums);
+    println!("get subset of nums by slice: from the first to the third");
+    println!("slice of nums: {:?}", &nums[0..=2]);
 
     let fruits: Vec<&str> = vec!["apple", "banana", "cherry"];
     println!("fruits are: {:?}", fruits);
