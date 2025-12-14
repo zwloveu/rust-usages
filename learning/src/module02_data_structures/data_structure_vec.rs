@@ -23,25 +23,32 @@ fn demonstrate_vec_basic() {
     nums.push(2);
     nums.push(3);
     println!("nums of vec: {:?}", nums);
+
     println!("add more");
     nums.insert(1, 5);
     nums.extend(vec![4, 6]);
     println!("nums of vec: {:?}", nums);
+
     println!("sort nums");
     nums.sort();
     println!("nums of vec: {:?}", nums);
+
     println!("reverse nums");
     nums.reverse();
     println!("nums of vec: {:?}", nums);
+
     println!("custom reverse nums");
     super::custom_reverse(&mut nums);
     println!("nums of vec: {:?}", nums);
+
     println!("unsafe custom reverse nums");
     super::unsafe_custom_reverse(&mut nums);
     println!("nums of vec: {:?}", nums);
+
     println!("remove the last from nums");
     let _ = nums.pop();
     println!("nums of vec: {:?}", nums);
+
     println!("change the last");
     if let Some(last) = nums.last_mut() {
         *last = -10000;

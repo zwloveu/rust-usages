@@ -23,6 +23,16 @@ pub fn init_features() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     features.extend(
+        &module02_data_structures::DataStructureHashMapModuleFeatureRegister::default()
+            .get_features(),
+    );
+
+    features.extend(
+        &module02_data_structures::DataStructureHashSetModuleFeatureRegister::default()
+            .get_features(),
+    );
+
+    features.extend(
         &module09_smart_pointers::SmartPointerBoxModuleFeatureRegister::default().get_features(),
     );
 

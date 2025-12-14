@@ -1,6 +1,12 @@
 mod data_structure_vec;
 pub use data_structure_vec::DataStructureVecModuleFeatureRegister;
 
+mod data_structure_hashmap;
+pub use data_structure_hashmap::DataStructureHashMapModuleFeatureRegister;
+
+mod data_structure_hashset;
+pub use data_structure_hashset::DataStructureHashSetModuleFeatureRegister;
+
 fn custom_reverse<T: Default>(vec: &mut Vec<T>) {
     if vec.len() <= 1 {
         return;
