@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{FeatureRegistry, module02_data_structures::custom_reverse};
+use crate::FeatureRegistry;
 
 #[derive(Default)]
 pub struct DataStructureVecModuleFeatureRegister;
@@ -34,10 +34,18 @@ fn demonstrate_vec_basic() {
     nums.reverse();
     println!("nums of vec: {:?}", nums);
     println!("custom reverse nums");
-    custom_reverse(&mut nums);
+    super::custom_reverse(&mut nums);
+    println!("nums of vec: {:?}", nums);
+    println!("unsafe custom reverse nums");
+    super::unsafe_custom_reverse(&mut nums);
     println!("nums of vec: {:?}", nums);
     println!("remove the last from nums");
     let _ = nums.pop();
+    println!("nums of vec: {:?}", nums);
+    println!("change the last");
+    if let Some(last) = nums.last_mut() {
+        *last = -10000;
+    }
     println!("nums of vec: {:?}", nums);
     println!("get subset of nums by slice: from the first to the third");
     println!("slice of nums: {:?}", &nums[0..=2]);
