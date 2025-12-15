@@ -3,6 +3,7 @@ use std::{
     sync::{Mutex, MutexGuard, OnceLock},
 };
 
+mod module01_mutability_rules;
 mod module02_data_structures;
 mod module09_smart_pointers;
 
@@ -17,6 +18,10 @@ pub fn init_features() -> Result<(), Box<dyn std::error::Error>> {
         GLOBAL_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
 
     let mut features: MutexGuard<'_, HashMap<&'static str, fn()>> = registry.lock()?;
+
+    features.extend(
+        &module01_mutability_rules::MutabilityRulesModuleFeatureRegister::default().get_features(),
+    );
 
     features.extend(
         &module02_data_structures::DataStructureVecModuleFeatureRegister::default().get_features(),
