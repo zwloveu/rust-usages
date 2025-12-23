@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"os"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -12,13 +14,20 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Printf("failed to run application: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	cfg := resource.NewConfig()
 	appState, err := resource.NewAppState(cfg)
 	if err != nil {
-		log.Fatalf("failed to init config：%v", err)
+		return fmt.Errorf("failed to init config：%v", err)
 	}
 
 	defer func() {
@@ -32,7 +41,9 @@ func main() {
 	var wg sync.WaitGroup
 
 	wg.Go(func() {
-		bootstrap.RunAPI(ctx, appState)
+		if err := bootstrap.RunAPI(ctx, appState); err != nil {
+			log.Printf("API failed to start: %v", err)
+		}
 	})
 
 	// Wait for CTRL+C
@@ -40,4 +51,6 @@ func main() {
 	log.Println("received exit signal, shutting down...")
 
 	wg.Wait()
+
+	return nil
 }
