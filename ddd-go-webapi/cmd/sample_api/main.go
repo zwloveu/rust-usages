@@ -1,9 +1,10 @@
 package main
 
 import (
+	"context"
 	"log"
-	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/zwloveu/rust-usages/ddd-go-webapi/internal/bootstrap"
@@ -11,6 +12,9 @@ import (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	cfg := resource.NewConfig()
 	appState, err := resource.NewAppState(cfg)
 	if err != nil {
@@ -25,16 +29,15 @@ func main() {
 		}
 	}()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		log.Println("received exit signal, shutting down server...")
-		os.Exit(0) // trigger the exit of main then execute defer statements
-	}()
+	var wg sync.WaitGroup
 
-	log.Println("starting API server...")
-	if err := bootstrap.RunAPI(appState); err != nil {
-		log.Fatalf("Failed to start API：%v", err)
-	}
+	wg.Go(func() {
+		bootstrap.RunAPI(ctx, appState)
+	})
+
+	// Wait for CTRL+C
+	<-ctx.Done()
+	log.Println("received exit signal, shutting down...")
+
+	wg.Wait()
 }

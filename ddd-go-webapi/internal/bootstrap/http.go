@@ -1,11 +1,13 @@
 package bootstrap
 
 import (
+	"context"
+
 	"github.com/zwloveu/rust-usages/ddd-go-webapi/internal/adapter/http"
 	"github.com/zwloveu/rust-usages/ddd-go-webapi/internal/resource"
 )
 
-func RunAPI(appState *resource.AppState) error {
+func RunAPI(ctx context.Context, appState *resource.AppState) error {
 	repositories := NewRepositories(appState)
 
 	applications := NewApplications(appState, repositories)
@@ -16,5 +18,5 @@ func RunAPI(appState *resource.AppState) error {
 
 	http.RegisterUserRoutes(router, handlers.UserHandler)
 
-	return http.Start(appState, router)
+	return http.Start(ctx, appState, router)
 }
