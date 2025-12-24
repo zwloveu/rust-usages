@@ -22,5 +22,20 @@ fn main() -> std::io::Result<()> {
 
     runtime.block_on(async_main());
 
+    let a = runtime.block_on(async_add(1, 2));
+    println!("{:?}", a);
+
+    let b = runtime.block_on(get_async_add_future());
+    println!("{:?}", b);
+
     Ok(())
+}
+
+async fn async_add(a: i32, b: i32) -> i32 {
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    a + b
+}
+
+fn get_async_add_future() -> impl Future<Output = i32> {
+    async_add(1, 2)
 }
