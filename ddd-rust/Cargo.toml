@@ -7,6 +7,10 @@ edition = "2024"
 name = "ddd_rust"
 path = "src/main.rs"
 
+[[bin]]
+name = "ddd_rust_sample_api"
+path = "src/bin/sample_api.rs"
+
 [dependencies]
 axum = { version = "0.8", features = ["macros", "json"] }
 tokio = { version = "1.0", features = ["full"] }
