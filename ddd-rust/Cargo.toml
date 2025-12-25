@@ -3,6 +3,10 @@ name = "ddd-rust"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "ddd_rust"
+path = "src/main.rs"
+
 [dependencies]
 axum = { version = "0.8", features = ["macros", "json"] }
 tokio = { version = "1.0", features = ["full"] }
