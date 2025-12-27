@@ -1,20 +1,15 @@
-use ddd_rust::{ddd_rust_entry, run};
-use std::error::Error;
-use tokio::runtime::Runtime;
+use ddd_rust::{TaskFuture, ddd_rust_entry, tokio_run};
+// use ddd_rust::AnyError;
 
-fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let runtime: Runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
+fn main() {
+    let tasks = vec![
+        Box::pin(ddd_rust_entry()) as TaskFuture,
+        // add below task to check application error
+        // Box::pin(async { Ok::<(), AnyError>(()) }) as TaskFuture,
+    ];
 
-    let server_handle = runtime.spawn(run(ddd_rust_entry()));
-
-    let result = runtime.block_on(server_handle)?;
-
-    if let Err(e) = result {
+    if let Err(e) = tokio_run(tasks) {
         eprintln!("Application error: {}", e);
         std::process::exit(1);
     }
-
-    Ok(())
 }
