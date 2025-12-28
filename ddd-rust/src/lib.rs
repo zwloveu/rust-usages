@@ -10,9 +10,11 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
-pub type TaskFuture = Pin<Box<dyn Future<Output = Result<(), AnyError>> + Send + 'static>>;
+pub type TaskResult = Result<(), AnyError>;
+pub type BoxedFuture = Pin<Box<dyn Future<Output = TaskResult> + Send>>;
+pub type TaskFactory = Box<dyn FnOnce(CancellationToken) -> BoxedFuture + Send>;
 
-pub fn tokio_run(tasks: Vec<TaskFuture>) -> Result<(), AnyError> {
+pub fn tokio_run(task_factories: Vec<TaskFactory>) -> TaskResult {
     // 1, build multiple thread tokio runtime
     let rt: Runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -24,23 +26,22 @@ pub fn tokio_run(tasks: Vec<TaskFuture>) -> Result<(), AnyError> {
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
     // 3, spawn all tasks
-    for task in tasks {
+    for factory in task_factories {
         let task_token = cancel_token.clone();
 
+        let task_future = factory(task_token);
+
         handles.push(rt.spawn(async move {
-            tokio::select! {
-                _ = task => {
-                    println!(
-                        "[Worker] task was already completed | thread: {:?}",
-                        std::thread::current().id());
-                },
-                _ = task_token.cancelled() => {
-                    // if worker was already completed,
-                    // this will never show because the main thread quit immediatly when press ctrl_c
-                    println!(
-                        "[Worker] Signal received, preparing to exit | thread: {:?}",
-                        std::thread::current().id());
-                }
+            match run(task_future, 300).await {
+                Ok(_) => println!(
+                    "[Worker] Task exited cleanly | thread: {:?}",
+                    std::thread::current().id()
+                ),
+                Err(e) => eprintln!(
+                    "[Worker] Task error: {:?} | thread: {:?}",
+                    e,
+                    std::thread::current().id()
+                ),
             }
         }));
     }
@@ -86,7 +87,11 @@ pub fn tokio_run(tasks: Vec<TaskFuture>) -> Result<(), AnyError> {
             "[Main] Waiting for all background handles to finish | thread: {:?}",
             std::thread::current().id()
         );
-        futures::future::join_all(handles).await;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            futures::future::join_all(handles),
+        )
+        .await;
         println!(
             "[Main] All handles joined | thread: {:?}",
             std::thread::current().id()
@@ -104,51 +109,100 @@ pub fn tokio_run(tasks: Vec<TaskFuture>) -> Result<(), AnyError> {
     Ok(())
 }
 
-pub async fn run<F, E>(f: F) -> Result<(), AnyError>
-where
-    F: Future<Output = Result<(), E>> + Send,
-    E: Into<AnyError>,
-{
-    f.await.map_err(|e| e.into())?;
-    Ok(())
-}
+pub async fn run(f: BoxedFuture, timeout_secs: u64) -> TaskResult {
+    println!(
+        "[Monitor] task begins to run，time limits {} seconds | thread: {:?}",
+        timeout_secs,
+        std::thread::current().id()
+    );
 
+    let start = std::time::Instant::now();
+    let res = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), f).await;
+
+    let duration = start.elapsed();
+
+    match res {
+        Ok(Ok(_)) => {
+            println!(
+                "[Monitor] task completed，take: {:?} | thread: {:?}",
+                duration,
+                std::thread::current().id()
+            );
+            Ok(())
+        }
+        Ok(Err(e)) => {
+            eprintln!(
+                "[Monitor] task throws logic err: {}, take: {:?} | thread: {:?}",
+                e,
+                duration,
+                std::thread::current().id()
+            );
+            Err(e)
+        }
+        Err(_) => {
+            eprintln!(
+                "[Monitor] task forced to shutdown due to timeout, take: {:?} | thread: {:?}",
+                duration,
+                std::thread::current().id()
+            );
+            Err("task timeout".into())
+        }
+    }
+}
 // fn do_something_wrong() -> Result<(), Box<dyn Error>> {
 //     Err("something went wrong".into())
 // }
 
-pub async fn ddd_rust_entry() -> Result<(), AnyError> {
-    let start = Instant::now();
+pub async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
+    println!("[Task] DDD Entry started");
 
-    let mut set = JoinSet::new();
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
 
-    for i in 0..=100_000 {
-        set.spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-            if i % 10000 == 0 {
-                println!(
-                    "[{}ms] | Task {} done | thread: {:?}",
-                    start.elapsed().as_millis(),
-                    i,
-                    std::thread::current().id()
-                );
+    loop {
+        tokio::select! {
+            // listening ctrl+c
+            _ = token.cancelled() => {
+                println!("[Task] DDD Entry received ctrl_c, preparing drop and exit");
+                break;
             }
-        });
+            // business
+            _ = interval.tick() => {
+                let start = Instant::now();
+
+                let mut set = JoinSet::new();
+
+                for i in 0..=100_000 {
+                    set.spawn(async move {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                        if i % 10000 == 0 {
+                            println!(
+                                "[{}ms] | Task {} done | thread: {:?}",
+                                start.elapsed().as_millis(),
+                                i,
+                                std::thread::current().id()
+                            );
+                        }
+                    });
+                }
+
+                // Wait for all tasks in the set to finish
+                while let Some(_) = set.join_next().await {}
+
+                println!(
+                    "[{}ms] All tasks done, thread id: {:?}",
+                    start.elapsed().as_millis(),
+                    thread::current().id()
+                );
+
+                let async_add_futures: Vec<Pin<Box<dyn Future<Output = i32> + Send>>> =
+                    vec![Box::pin(async_add(1, 2)), Box::pin(get_async_add_future())];
+                let results: Vec<i32> = futures::future::join_all(async_add_futures).await;
+                println!("[{}ms] {:?}", start.elapsed().as_millis(), results);
+            }
+        }
     }
 
-    // Wait for all tasks in the set to finish
-    while let Some(_) = set.join_next().await {}
-
-    println!(
-        "[{}ms] All tasks done, thread id: {:?}",
-        start.elapsed().as_millis(),
-        thread::current().id()
-    );
-
-    let async_add_futures: Vec<Pin<Box<dyn Future<Output = i32> + Send>>> =
-        vec![Box::pin(async_add(1, 2)), Box::pin(get_async_add_future())];
-    let results: Vec<i32> = futures::future::join_all(async_add_futures).await;
-    println!("[{}ms] {:?}", start.elapsed().as_millis(), results);
+    println!("[Task] DDD Entry dropped");
 
     Ok(())
 }
