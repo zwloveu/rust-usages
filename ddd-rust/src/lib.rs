@@ -3,6 +3,8 @@ use std::pin::Pin;
 use std::thread;
 use std::time::Duration;
 
+use axum::Router;
+use axum::routing::get;
 use tokio::runtime::Runtime;
 use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::Instant;
@@ -44,11 +46,6 @@ pub fn tokio_run(task_factories: Vec<TaskFactory>) -> TaskResult {
                 ),
             }
         }));
-    }
-
-    if handles.len() > 1 {
-        let err: AnyError = "many tasks".into();
-        return Err(err);
     }
 
     // 4. main thread block here: listening CTRL+C
@@ -214,4 +211,19 @@ async fn async_add(a: i32, b: i32) -> i32 {
 
 fn get_async_add_future() -> impl Future<Output = i32> + Send {
     async_add(1, 2)
+}
+
+pub async fn axum_worker_entry(token: CancellationToken) -> TaskResult {
+    let app = Router::new().route("/health", get(|| async { "OK" }));
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:9527").await?;
+
+    println!("[Worker-Axum] stars at 9527");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            token.cancelled().await;
+            println!("[Worker-Axum] is shutting down");
+        })
+        .await
+        .map_err(|e| e.into())
 }
