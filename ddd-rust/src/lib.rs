@@ -15,8 +15,12 @@ pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
 pub type TaskResult = Result<(), AnyError>;
 pub type BoxedFuture = Pin<Box<dyn Future<Output = TaskResult> + Send>>;
 pub type TaskFactory = Box<dyn FnOnce(CancellationToken) -> BoxedFuture + Send>;
+pub struct TaskDefinition {
+    pub id: String,
+    pub factory: TaskFactory,
+}
 
-pub fn tokio_run(task_factories: Vec<TaskFactory>) -> TaskResult {
+pub fn tokio_run(task_definitions: Vec<TaskDefinition>) -> TaskResult {
     // 1, build multiple thread tokio runtime
     let rt: Runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -28,19 +32,21 @@ pub fn tokio_run(task_factories: Vec<TaskFactory>) -> TaskResult {
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
     // 3, spawn all tasks
-    for factory in task_factories {
+    for task_definition in task_definitions {
         let task_token = cancel_token.clone();
 
-        let task_future = factory(task_token);
+        let task_future = (task_definition.factory)(task_token);
 
         handles.push(rt.spawn(async move {
-            match run(task_future, 300).await {
+            match run_worker(task_definition.id.to_owned(), task_future, 300).await {
                 Ok(_) => println!(
-                    "[Worker] Task exited cleanly | thread: {:?}",
+                    "[{:?}] Task exited cleanly | thread: {:?}",
+                    task_definition.id,
                     std::thread::current().id()
                 ),
                 Err(e) => eprintln!(
-                    "[Worker] Task error: {:?} | thread: {:?}",
+                    "[{:?}] Task error: {:?} | thread: {:?}",
+                    task_definition.id,
                     e,
                     std::thread::current().id()
                 ),
@@ -106,10 +112,9 @@ pub fn tokio_run(task_factories: Vec<TaskFactory>) -> TaskResult {
     Ok(())
 }
 
-pub async fn run(f: BoxedFuture, timeout_secs: u64) -> TaskResult {
+pub async fn run_worker(worker_id: String, f: BoxedFuture, timeout_secs: u64) -> TaskResult {
     println!(
-        "[Monitor] task begins to run，time limits {} seconds | thread: {:?}",
-        timeout_secs,
+        "[{worker_id}] task begins to run，time limits {timeout_secs} seconds | thread: {:?}",
         std::thread::current().id()
     );
 
@@ -121,7 +126,7 @@ pub async fn run(f: BoxedFuture, timeout_secs: u64) -> TaskResult {
     match res {
         Ok(Ok(_)) => {
             println!(
-                "[Monitor] task completed，take: {:?} | thread: {:?}",
+                "[{worker_id}] task completed，take: {:?} | thread: {:?}",
                 duration,
                 std::thread::current().id()
             );
@@ -129,7 +134,7 @@ pub async fn run(f: BoxedFuture, timeout_secs: u64) -> TaskResult {
         }
         Ok(Err(e)) => {
             eprintln!(
-                "[Monitor] task throws logic err: {}, take: {:?} | thread: {:?}",
+                "[{worker_id}] task throws logic err: {}, take: {:?} | thread: {:?}",
                 e,
                 duration,
                 std::thread::current().id()
@@ -138,7 +143,7 @@ pub async fn run(f: BoxedFuture, timeout_secs: u64) -> TaskResult {
         }
         Err(_) => {
             eprintln!(
-                "[Monitor] task forced to shutdown due to timeout, take: {:?} | thread: {:?}",
+                "[{worker_id}] task forced to shutdown due to timeout, take: {:?} | thread: {:?}",
                 duration,
                 std::thread::current().id()
             );
@@ -151,7 +156,7 @@ pub async fn run(f: BoxedFuture, timeout_secs: u64) -> TaskResult {
 // }
 
 pub async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
-    println!("[Task] DDD Entry started");
+    println!("[ddd_rust_entry] started");
 
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
 
@@ -159,7 +164,7 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
         tokio::select! {
             // listening ctrl+c
             _ = token.cancelled() => {
-                println!("[Task] DDD Entry received ctrl_c, preparing drop and exit");
+                println!("[ddd_rust_entry] received ctrl_c, preparing drop and exit");
                 break;
             }
             // business
@@ -173,7 +178,7 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
                         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                         if i % 10000 == 0 {
                             println!(
-                                "[{}ms] | Task {} done | thread: {:?}",
+                                "[ddd_rust_entry] [{}ms] | Task {} done | thread: {:?}",
                                 start.elapsed().as_millis(),
                                 i,
                                 std::thread::current().id()
@@ -186,7 +191,7 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
                 while let Some(_) = set.join_next().await {}
 
                 println!(
-                    "[{}ms] All tasks done, thread id: {:?}",
+                    "[ddd_rust_entry] [{}ms] All tasks done, thread id: {:?}",
                     start.elapsed().as_millis(),
                     thread::current().id()
                 );
@@ -194,12 +199,12 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
                 let async_add_futures: Vec<Pin<Box<dyn Future<Output = i32> + Send>>> =
                     vec![Box::pin(async_add(1, 2)), Box::pin(get_async_add_future())];
                 let results: Vec<i32> = futures::future::join_all(async_add_futures).await;
-                println!("[{}ms] {:?}", start.elapsed().as_millis(), results);
+                println!("[ddd_rust_entry] [{}ms] {:?}", start.elapsed().as_millis(), results);
             }
         }
     }
 
-    println!("[Task] DDD Entry dropped");
+    println!("[ddd_rust_entry] dropped");
 
     Ok(())
 }
@@ -217,12 +222,12 @@ pub async fn axum_worker_entry(token: CancellationToken) -> TaskResult {
     let app = Router::new().route("/health", get(|| async { "OK" }));
     let listener = tokio::net::TcpListener::bind("0.0.0.0:9527").await?;
 
-    println!("[Worker-Axum] stars at 9527");
+    println!("[axum_worker_entry] stars at 9527");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             token.cancelled().await;
-            println!("[Worker-Axum] is shutting down");
+            println!("[axum_worker_entry] is shutting down");
         })
         .await
         .map_err(|e| e.into())
