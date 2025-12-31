@@ -27,7 +27,6 @@ pub fn tokio_run(
 
     loop {
         if global_cancel_token.is_cancelled() {
-            println!("[RunTokio] 全局关闭信号已触发，同步守护循环退出");
             break;
         }
 
