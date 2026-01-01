@@ -1,55 +1,87 @@
 use std::thread;
 
-use crossbeam_channel::{RecvError, unbounded};
+use crossbeam_channel::unbounded;
 use ddd_rust::{
-    GlobalCommand, LongRunningWorker, MainThreadCommand, TaskResult, ddd_rust_entry,
-    start_axum_server, start_console_input_thread, tokio_run,
+    AppError, SystemEvent, TaskFactory, create_axum_factory, create_ddd_rust_entry_factory,
+    create_monitoring_factory, create_signal_handler_factory, tokio_run_internal,
 };
 use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
 
-fn main() -> TaskResult {
-    let global_cancel_token = CancellationToken::new();
-    let (cmd_tx, cmd_rx) = unbounded::<GlobalCommand>();
-    let (main_cmd_sender, main_cmd_receiver) = unbounded::<MainThreadCommand>();
-
+fn main() -> Result<(), AppError> {
+    // 1. [Infrastructure] Create the Runtime at the very top of the stack
+    // This ensures the runtime is the last thing to be dropped
     let rt: Runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?;
-    let rt_handle = rt.handle().clone();
+        .build()
+        .map_err(|e| AppError::Fatal(e.to_string()))?;
 
-    let tasks: Vec<LongRunningWorker> = vec![
-        LongRunningWorker {
-            id: "ddd_entry_worker_task".to_owned(),
-            factory: Box::new(|token| Box::pin(ddd_rust_entry(token))),
-        },
-        LongRunningWorker {
-            id: "axum_worker_entry".to_owned(),
-            factory: Box::new(|token| {
-                Box::pin(start_axum_server("axum_worker_entry".to_owned(), token))
-            }),
-        },
+    // 2. [Communication] Initialize Crossbeam for Sync-Async bridge
+    let (event_tx, event_rx) = unbounded::<SystemEvent>();
+    let global_cancel_token = CancellationToken::new();
+
+    // 3. [Task Definitions] Example: Multiple factories
+    let factories: Vec<TaskFactory> = vec![
+        create_ddd_rust_entry_factory(),
+        create_monitoring_factory(),
+        create_axum_factory(9527),
+        create_signal_handler_factory(event_tx.clone()),
     ];
 
-    let global_cancel_token_clone = global_cancel_token.clone();
-    thread::spawn(move || {
-        tokio_run(rt_handle, global_cancel_token_clone, cmd_rx, tasks);
-    });
+    // 4. [Execution] Spawn the Manager Thread
+    // The Runtime stays in main, the Handle goes into the thread
+    let manager_thread = {
+        let rt_handle = rt.handle().clone();
+        let token = global_cancel_token.clone();
+        let tx = event_tx.clone();
 
-    start_console_input_thread(main_cmd_sender.clone(), cmd_tx.clone());
+        thread::spawn(move || {
+            // Transform this OS thread into a dedicated Runtime Worker
+            rt_handle.block_on(async {
+                if let Err(e) = tokio_run_internal(token, tx, factories).await {
+                    // This is reached if tokio_run_internal hits a Fatal error
+                    eprintln!("[Runtime Host] Fatal error escalated: {:?}", e);
+                    Err(e)
+                } else {
+                    Ok(())
+                }
+            })
+        })
+    };
 
+    // 5. [Orchestration] Main Thread Loop (Reactive Controller)
+    println!("[Main] System Controller started.");
     loop {
-        match main_cmd_receiver.recv() {
-            Ok(MainThreadCommand::ShutdownFramework) => {
-                global_cancel_token.cancel();
-                break;
+        crossbeam_channel::select! {
+            // Listen for events from the Async world
+            recv(event_rx) -> event => {
+                match event {
+                    Ok(SystemEvent::TaskFatalError { task_name, error }) => {
+                        eprintln!("[Main] Critical failure in {}: {}. Initiating shutdown...", task_name, error);
+                        global_cancel_token.cancel();
+                        break;
+                    }
+                    Ok(SystemEvent::ShutdownTriggered) => break,
+                    _ => {}
+                }
             }
-            Err(RecvError) => {
-                global_cancel_token.cancel();
-                break;
+
+            // Non-blocking check for thread health
+            default(std::time::Duration::from_millis(200)) => {
+                if manager_thread.is_finished() {
+                    println!("[Main] Manager thread exited unexpectedly.");
+                    break;
+                }
             }
         }
     }
 
+    // 6. [Graceful Exit]
+    println!("[Main] Cleaning up resources...");
+    global_cancel_token.cancel();
+    let _ = manager_thread.join();
+
+    // Once we exit main, 'rt' is dropped, closing all remaining async tasks
+    println!("[Main] Shutdown complete.");
     Ok(())
 }

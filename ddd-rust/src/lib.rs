@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::io::{self, BufRead};
 use std::pin::Pin;
 use std::thread;
 
@@ -10,35 +9,70 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 mod tokio_workers;
-pub use tokio_workers::start_axum_server;
-pub use tokio_workers::tokio_run;
+use tokio_workers::start_axum_server;
+pub use tokio_workers::tokio_run_internal;
 
-pub type AnyError = Box<dyn std::error::Error + Send + Sync>;
-pub type TaskResult = Result<(), AnyError>;
+#[derive(thiserror::Error, Debug)]
+pub enum AppError {
+    #[error("Fatal system error: {0}")]
+    Fatal(String),
+
+    #[error("Recoverable task error: {0}")]
+    Recoverable(String),
+}
+
+pub enum SystemEvent {
+    TaskFatalError { task_name: String, error: AppError },
+    TaskRecovered { task_name: String },
+    ShutdownTriggered,
+}
+
+pub type TaskResult = Result<(), AppError>;
 pub type BoxedFuture = Pin<Box<dyn Future<Output = TaskResult> + Send>>;
 pub type TaskFactory = Box<dyn Fn(CancellationToken) -> BoxedFuture + Send>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum WorkerId {
-    AxumWorker,
+pub fn create_axum_factory(port: u16) -> TaskFactory {
+    Box::new(move |token| Box::pin(start_axum_server(token, port)))
 }
 
-#[derive(Debug, Clone)]
-pub enum GlobalCommand {
-    RestartWorker(WorkerId),
+pub fn create_monitoring_factory() -> TaskFactory {
+    Box::new(move |token: CancellationToken| {
+        Box::pin(async move {
+            println!("[Task] Monitoring service started.");
+
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        println!("[Task] Monitoring service stopping...");
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        // Simulate a monitoring check
+                        if let Err(e) = perform_health_check().await {
+                            // Example of a recoverable error: log and continue
+                            tracing::warn!("Minor monitoring glitch: {}", e);
+                            // If this were a fatal error, we would 'return Err(AppError::Fatal(...))'
+                        }
+                    }
+                }
+            }
+            Ok(())
+        })
+    })
 }
 
-#[derive(Debug, Clone)]
-pub enum MainThreadCommand {
-    ShutdownFramework,
+async fn perform_health_check() -> Result<(), String> {
+    // Logic for checking disk/mem/cpu...
+    Ok(())
 }
 
-pub struct LongRunningWorker {
-    pub id: String,
-    pub factory: TaskFactory,
+pub fn create_ddd_rust_entry_factory() -> TaskFactory {
+    Box::new(move |token| Box::pin(ddd_rust_entry(token)))
 }
 
-pub async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
+async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
     println!("[ddd_rust_entry] started");
 
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -100,53 +134,16 @@ fn get_async_add_future() -> impl Future<Output = i32> + Send {
     async_add(1, 2)
 }
 
-pub fn start_console_input_thread(
-    main_cmd_sender: Sender<MainThreadCommand>,
-    cmd_tx: Sender<GlobalCommand>,
-) {
-    thread::spawn(move || {
-        println!("\n[Terminal] Type：");
-        println!("[Terminal] shutdown - exit");
-        println!("[Terminal] restart - restart axum server");
-        println!("[Terminal] Please type order then press enter：");
-
-        let stdin = io::stdin();
-        for line in stdin.lock().lines() {
-            match line {
-                Ok(input) => {
-                    let input = input.trim().to_lowercase();
-                    match input.as_str() {
-                        "shutdown" => {
-                            if let Err(e) =
-                                main_cmd_sender.send(MainThreadCommand::ShutdownFramework)
-                            {
-                                eprintln!("[Terminal] failed to send exit command: {}", e);
-                            } else {
-                                println!("[Terminal] successfully sent exit command, exiting...");
-                                break;
-                            }
-                        }
-                        "restart" => {
-                            if let Err(e) =
-                                cmd_tx.send(GlobalCommand::RestartWorker(WorkerId::AxumWorker))
-                            {
-                                eprintln!("[Terminal] failed to send restart command: {}", e);
-                            } else {
-                                println!(
-                                    "[Terminal] successfully sent exit command, restarting..."
-                                );
-                            }
-                        }
-                        _ => {
-                            println!("[Terminal] command: shutdown or restart");
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[Terminal] failed to read input: {}", e);
-                    break;
-                }
+pub fn create_signal_handler_factory(event_tx: Sender<SystemEvent>) -> TaskFactory {
+    Box::new(move |_token| {
+        let tx = event_tx.clone();
+        Box::pin(async move {
+            // Tokio's built-in signal listener
+            if tokio::signal::ctrl_c().await.is_ok() {
+                println!("\n[Signal] Ctrl+C detected");
+                let _ = tx.send(SystemEvent::ShutdownTriggered);
             }
-        }
-    });
+            Ok(())
+        })
+    })
 }
