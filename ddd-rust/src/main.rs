@@ -79,7 +79,12 @@ fn main() -> Result<(), AppError> {
     // 6. [Graceful Exit]
     println!("[Main] Cleaning up resources...");
     global_cancel_token.cancel();
-    let _ = manager_thread.join();
+    if let Err(panic_info) = manager_thread.join() {
+        eprintln!(
+            "[Main] Manager thread panicked at the last moment: {:?}",
+            panic_info
+        );
+    }
 
     // Once we exit main, 'rt' is dropped, closing all remaining async tasks
     println!("[Main] Shutdown complete.");
