@@ -49,7 +49,7 @@ fn main() -> Result<(), AppError> {
             rt_handle.block_on(async {
                 if let Err(e) = tokio_run_internal(token, tx, factories).await {
                     // This is reached if tokio_run_internal hits a Fatal error
-                    eprintln!("[Runtime Host] Fatal error escalated: {:?}", e);
+                    tracing::error!("[Runtime Host] Fatal error escalated: {}", e);
                     Err(e)
                 } else {
                     Ok(())
@@ -59,14 +59,14 @@ fn main() -> Result<(), AppError> {
     };
 
     // 5. [Orchestration] Main Thread Loop (Reactive Controller)
-    println!("[Main] System Controller started.");
+    tracing::info!("[Main] System Controller started.");
     loop {
         crossbeam_channel::select! {
             // Listen for events from the Async world
             recv(event_rx) -> event => {
                 match event {
                     Ok(SystemEvent::TaskFatalError { task_name, error }) => {
-                        eprintln!("[Main] Critical failure in {}: {}. Initiating shutdown...", task_name, error);
+                        tracing::error!("[Main] Critical failure in {}: {}. Initiating shutdown...", task_name, error);
                         global_cancel_token.cancel();
                         break;
                     }
@@ -78,7 +78,7 @@ fn main() -> Result<(), AppError> {
             // Non-blocking check for thread health
             default(std::time::Duration::from_millis(200)) => {
                 if manager_thread.is_finished() {
-                    println!("[Main] Manager thread exited unexpectedly.");
+                    tracing::info!("[Main] Manager thread exited unexpectedly.");
                     break;
                 }
             }
@@ -86,16 +86,16 @@ fn main() -> Result<(), AppError> {
     }
 
     // 6. [Graceful Exit]
-    println!("[Main] Cleaning up resources...");
+    tracing::info!("[Main] Cleaning up resources...");
     global_cancel_token.cancel();
     if let Err(panic_info) = manager_thread.join() {
-        eprintln!(
+        tracing::error!(
             "[Main] Manager thread panicked at the last moment: {:?}",
             panic_info
         );
     }
 
     // Once we exit main, 'rt' is dropped, closing all remaining async tasks
-    println!("[Main] Shutdown complete.");
+    tracing::info!("[Main] Shutdown complete.");
     Ok(())
 }

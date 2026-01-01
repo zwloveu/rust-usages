@@ -38,14 +38,14 @@ pub fn create_axum_factory(port: u16) -> TaskFactory {
 pub fn create_monitoring_factory() -> TaskFactory {
     Box::new(move |token: CancellationToken| {
         Box::pin(async move {
-            println!("[Task] Monitoring service started.");
+            tracing::info!("[Task] Monitoring service started.");
 
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
 
             loop {
                 tokio::select! {
                     _ = token.cancelled() => {
-                        println!("[Task] Monitoring service stopping...");
+                        tracing::info!("[Task] Monitoring service stopping...");
                         break;
                     }
                     _ = interval.tick() => {
@@ -73,14 +73,14 @@ pub fn create_ddd_rust_entry_factory() -> TaskFactory {
 }
 
 async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
-    println!("[ddd_rust_entry] started");
+    tracing::info!("[ddd_rust_entry] started");
 
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
 
     loop {
         tokio::select! {
             _ = token.cancelled() => {
-                println!("[ddd_rust_entry] received ctrl_c, preparing drop and exit");
+                tracing::info!("[ddd_rust_entry] received ctrl_c, preparing drop and exit");
                 break;
             }
             // business
@@ -93,7 +93,7 @@ async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
                     set.spawn(async move {
                         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                         if i % 10000 == 0 {
-                            println!(
+                            tracing::info!(
                                 "[ddd_rust_entry] [{}ms] | Task {} done | thread: {:?}",
                                 start.elapsed().as_millis(),
                                 i,
@@ -106,7 +106,7 @@ async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
                 // Wait for all tasks in the set to finish
                 while let Some(_) = set.join_next().await {}
 
-                println!(
+                tracing::info!(
                     "[ddd_rust_entry] [{}ms] All tasks done, thread id: {:?}",
                     start.elapsed().as_millis(),
                     thread::current().id()
@@ -115,12 +115,12 @@ async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
                 let async_add_futures: Vec<Pin<Box<dyn Future<Output = i32> + Send>>> =
                     vec![Box::pin(async_add(1, 2)), Box::pin(get_async_add_future())];
                 let results: Vec<i32> = futures::future::join_all(async_add_futures).await;
-                println!("[ddd_rust_entry] [{}ms] {:?}", start.elapsed().as_millis(), results);
+                tracing::info!("[ddd_rust_entry] [{}ms] {:?}", start.elapsed().as_millis(), results);
             }
         }
     }
 
-    println!("[ddd_rust_entry] dropped");
+    tracing::info!("[ddd_rust_entry] dropped");
 
     Ok(())
 }
@@ -140,7 +140,7 @@ pub fn create_signal_handler_factory(event_tx: Sender<SystemEvent>) -> TaskFacto
         Box::pin(async move {
             // Tokio's built-in signal listener
             if tokio::signal::ctrl_c().await.is_ok() {
-                println!("\n[Signal] Ctrl+C detected");
+                tracing::info!("[Signal] Ctrl+C detected");
                 let _ = tx.send(SystemEvent::ShutdownTriggered);
             }
             Ok(())
