@@ -9,6 +9,15 @@ use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
 
 fn main() -> Result<(), AppError> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .init();
+
+    tracing::info!("System is starting up...");
+
     // 1. [Infrastructure] Create the Runtime at the very top of the stack
     // This ensures the runtime is the last thing to be dropped
     let rt: Runtime = tokio::runtime::Builder::new_multi_thread()
