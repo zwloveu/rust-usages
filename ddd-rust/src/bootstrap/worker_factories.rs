@@ -4,6 +4,7 @@ use crate::adapter::health_checks;
 use crate::adapter::http as adapter_http;
 use crate::adapter::http::RouterExt;
 use crate::adapter::long_runnings;
+use crate::adapter::short_livings;
 use crate::domain;
 
 pub fn create_axum_factory(port: u16) -> domain::TaskFactory {
@@ -49,4 +50,15 @@ pub fn create_monitoring_factory() -> domain::TaskFactory {
 
 pub fn create_ddd_rust_entry_factory() -> domain::TaskFactory {
     Box::new(move |token| Box::pin(long_runnings::ddd_rust_entry(token)))
+}
+
+pub fn create_load_test_factory(
+    url: String,
+    concurrency: usize,
+    rounds: usize,
+) -> domain::TaskFactory {
+    Box::new(move |token| {
+        let u = url.clone();
+        Box::pin(short_livings::run_load_test(token, u, concurrency, rounds))
+    })
 }

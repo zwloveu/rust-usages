@@ -15,6 +15,10 @@ path = "src/bin/ddd_rust.rs"
 name = "ddd_rust_sample_api"
 path = "src/bin/sample_api.rs"
 
+[[bin]]
+name = "ddd_rust_sample_api_client"
+path = "src/bin/sample_api_client.rs"
+
 [dependencies]
 axum = { version = "0.8", features = ["macros", "json"] }
 tokio = { version = "1.0", features = ["full"] }
@@ -31,3 +35,6 @@ tokio-util = { version = "0.7", features = ["full"] }
 crossbeam-channel = "0.5"
 crossbeam = "0.8"
 rand = "0.9"
+reqwest = "0.13"
+clap = { version = "4.5", features = ["derive"] }
+comfy-table = "7.2"

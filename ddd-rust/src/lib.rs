@@ -1,5 +1,5 @@
 pub mod bootstrap;
 
 mod adapter;
-mod domain;
+pub mod domain;
 mod infrastructure;

@@ -4,20 +4,20 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domain;
 
-pub fn build_tokio_runtime() -> Result<tokio::runtime::Runtime, domain::AppError> {
+pub fn build_tokio_runtime() -> Result<tokio::runtime::Runtime, domain::errors::AppError> {
     Ok(tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| domain::AppError::Fatal {
-            error: domain::FatalError(e.to_string()),
+        .map_err(|e| domain::errors::AppError::Fatal {
+            error: domain::errors::FatalError(e.to_string()),
         })?)
 }
 
 pub async fn tokio_run_internal(
     cancel_token: CancellationToken,
-    event_tx: Sender<domain::SystemEvent>,
+    event_tx: Sender<domain::events::SystemEvent>,
     factories: Vec<domain::TaskFactory>,
-) -> Result<(), domain::AppError> {
+) -> Result<(), domain::errors::AppError> {
     let mut set = JoinSet::new();
 
     // 1. Initialize and spawn all background tasks
@@ -38,17 +38,22 @@ pub async fn tokio_run_internal(
             // Monitor task execution status and fatal errors
             Some(result) = set.join_next() => {
                 match result {
-                    Ok(Ok(())) => tracing::debug!("Task completed successfully."),
-                    Ok(Err(domain::AppError::Fatal{error})) => {
+                    Ok(Ok(())) => {
+                        tracing::info!("[Orchestrator] A task completed successfully. Remaining: {}", set.len());
+                        let _ = event_tx.send(domain::events::SystemEvent::TaskCompleted {
+                            task_name: "Short-living Task".into()
+                        });
+                    },
+                    Ok(Err(domain::errors::AppError::Fatal{error})) => {
                         tracing::error!("Fatal error detected: {}. Escalating...", error);
-                        let _ = event_tx.send(domain::SystemEvent::TaskFatalError {
+                        let _ = event_tx.send(domain::events::SystemEvent::TaskFatalError {
                             task_name: "Service".into(),
                             error: error.clone(),
                         });
                         cancel_token.cancel(); // Trigger ripple shutdown
                         break;
                     }
-                    Ok(Err(domain::AppError::Recoverable{error})) => tracing::warn!("Recoverable error: {}", error),
+                    Ok(Err(domain::errors::AppError::Recoverable{error})) => tracing::warn!("Recoverable error: {}", error),
                     Err(join_err) => {
                         if join_err.is_panic() {
                             tracing::error!("Task panic detected! Escalating...");
