@@ -3,9 +3,8 @@ use crate::{
     domain,
 };
 
-pub fn run_ddd_rust() -> Result<(), domain::AppError> {
+pub fn run_ddd_rust_sample_api() -> Result<(), domain::AppError> {
     let factories: Vec<domain::TaskFactory> = vec![
-        worker_factories::create_ddd_rust_entry_factory(),
         worker_factories::create_monitoring_factory(),
         worker_factories::create_axum_factory(9527),
     ];

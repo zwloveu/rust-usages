@@ -8,7 +8,9 @@ pub fn build_tokio_runtime() -> Result<tokio::runtime::Runtime, domain::AppError
     Ok(tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| domain::AppError::Fatal(e.to_string()))?)
+        .map_err(|e| domain::AppError::Fatal {
+            error: domain::FatalError(e.to_string()),
+        })?)
 }
 
 pub async fn tokio_run_internal(
@@ -37,16 +39,16 @@ pub async fn tokio_run_internal(
             Some(result) = set.join_next() => {
                 match result {
                     Ok(Ok(())) => tracing::debug!("Task completed successfully."),
-                    Ok(Err(domain::AppError::Fatal(e))) => {
-                        tracing::error!("Fatal error detected: {}. Escalating...", e);
+                    Ok(Err(domain::AppError::Fatal{error})) => {
+                        tracing::error!("Fatal error detected: {}. Escalating...", error);
                         let _ = event_tx.send(domain::SystemEvent::TaskFatalError {
                             task_name: "Service".into(),
-                            error: domain::AppError::Fatal(e.clone())
+                            error: error.clone(),
                         });
                         cancel_token.cancel(); // Trigger ripple shutdown
                         break;
                     }
-                    Ok(Err(domain::AppError::Recoverable(msg))) => tracing::warn!("Recoverable error: {}", msg),
+                    Ok(Err(domain::AppError::Recoverable{error})) => tracing::warn!("Recoverable error: {}", error),
                     Err(join_err) => {
                         if join_err.is_panic() {
                             tracing::error!("Task panic detected! Escalating...");

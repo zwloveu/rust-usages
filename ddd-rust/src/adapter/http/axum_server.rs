@@ -13,7 +13,9 @@ pub async fn start_axum_server(
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
-        .map_err(|e| domain::AppError::Fatal(format!("Port {} bound failed: {}", port, e)))?;
+        .map_err(|e| domain::AppError::Fatal {
+            error: domain::FatalError(format!("Port {} bound failed: {}", port, e)),
+        })?;
 
     tracing::info!("[axum_server] stars at 9527");
 
@@ -26,7 +28,9 @@ pub async fn start_axum_server(
             tracing::info!("[axum_server] shutdown completed");
         })
         .await
-        .map_err(|e| domain::AppError::Fatal(format!("Axum runtime error: {}", e)))?;
+        .map_err(|e| domain::AppError::Fatal {
+            error: domain::FatalError(format!("Axum runtime error: {}", e)),
+        })?;
 
     Ok(())
 }
