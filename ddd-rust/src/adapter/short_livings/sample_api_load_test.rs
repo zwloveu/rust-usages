@@ -1,7 +1,6 @@
-use crate::domain;
-use std::sync::Arc;
-use tokio::sync::{Semaphore, mpsc};
-use tokio::task::JoinSet;
+use futures::StreamExt;
+use reqwest::Client;
+use std::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -9,123 +8,85 @@ use comfy_table::modifiers::UTF8_ROUND_CORNERS;
 use comfy_table::presets::UTF8_FULL;
 use comfy_table::{Cell, Color, Table};
 
+use crate::domain;
+
 pub async fn run_load_test(
     token: CancellationToken,
     url: String,
     concurrency: usize,
     rounds: usize,
-    timeout: u64,
+    timeout_ms: u64,
 ) -> Result<(), domain::errors::AppError> {
+    // 1. Build a high-performance HTTP client
+    let client = Client::builder()
+        // Essential for Windows to bypass the 300ms Delayed ACK / Nagle algorithm latency
+        .tcp_nodelay(true)
+        .pool_max_idle_per_host(concurrency)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .connect_timeout(Duration::from_millis(timeout_ms))
+        .build()
+        .map_err(|e| domain::errors::AppError::Fatal {
+            error: domain::errors::FatalError(format!("Failed to build client: {}", e)),
+        })?;
+
+    // 2. Connection Pool Warm-up
+    // Send initial requests to establish TCP/TLS handshakes before measuring
+    // This prevents "cold start" handshakes from polluting P99 metrics
+    tracing::info!("Warming up connection pool...");
+    for _ in 0..10 {
+        let _ = client.get(&url).send().await;
+    }
+
     tracing::info!(
-        "[LoadTester] Start: URL={}, Concurrency={}, Round={}",
+        "[LoadTester] Start: URL={}, Concurrency={}, Total Rounds={}",
         url,
         concurrency,
         rounds
     );
 
-    let client = reqwest::Client::builder()
-        .pool_max_idle_per_host(concurrency)
-        .connect_timeout(std::time::Duration::from_millis(timeout))
-        .build()
-        .map_err(|e| domain::errors::AppError::Fatal {
-            error: domain::errors::FatalError(format!("failed to build reqwest client: {}", e)),
-        })?;
+    let start_test = Instant::now();
 
-    let semaphore = Arc::new(Semaphore::new(concurrency));
+    // 3. Distribute requests using Stream for efficient concurrency control
+    // buffer_unordered is superior to manual Semaphore/JoinSet as it reduces task-switching overhead
+    let stats = futures::stream::iter(0..rounds)
+        .map(|_| {
+            let client = client.clone();
+            let url = url.clone();
+            let token = token.clone();
 
-    let (tx, mut rx) = mpsc::channel(concurrency * 2);
-
-    let stats_task = tokio::spawn(async move {
-        let mut success_count = 0;
-        let mut error_map = std::collections::HashMap::new();
-        let mut latencies = Vec::new();
-
-        while let Some((status, duration)) = rx.recv().await {
-            if status >= 200 && status < 300 {
-                success_count += 1;
-                if let Some(d) = duration {
-                    latencies.push(d);
+            async move {
+                if token.is_cancelled() {
+                    return None;
                 }
-            } else {
-                *error_map.entry(status).or_insert(0) += 1;
-            }
-        }
-        (success_count, error_map, latencies)
-    });
 
-    let mut set = JoinSet::new();
+                let start = Instant::now();
+                let res = client.get(&url).send().await;
+                let elapsed = start.elapsed();
 
-    for i in 0..rounds {
-        tokio::select! {
-            _ = token.cancelled() => {
-                tracing::warn!("[LoadTester] received stop signal, aborting dispatch.");
-                break;
-            }
-            permit = semaphore.clone().acquire_owned() => {
-                let permit = permit.map_err(|e| domain::errors::AppError::Fatal{error: domain::errors::FatalError(e.to_string())})?;
-                let c = client.clone();
-                let u = url.clone();
-                let tx_clone = tx.clone();
-
-                set.spawn(async move {
-                    let _permit = permit;
-                    let start = Instant::now();
-                    let res = c.get(&u).send().await;
-                    let elapsed = start.elapsed();
-
-                    match res {
-                        Ok(resp) => {
-                            let status = resp.status().as_u16();
-                            let _ = tx_clone.send((status, Some(elapsed))).await;
-                            tracing::info!(
-                                target: "load_tester_task",
-                                index = i,
-                                status = status,
-                                elapsed_ms = elapsed.as_millis(),
-                                "Request processed"
-                            );
-                        },
-                        Err(e) => {
-                            let _ = tx_clone.send((0, None)).await;
-                            tracing::error!(
-                                target: "load_tester_task",
-                                index = i,
-                                error = %e,
-                                "Request failed"
-                            );
-                        }
+                match res {
+                    Ok(resp) if resp.status().is_success() => Some(elapsed),
+                    _ => {
+                        // Failures are excluded from latency statistics but recorded as None
+                        None
                     }
-                });
+                }
             }
-        }
-    }
+        })
+        .buffer_unordered(concurrency)
+        .collect::<Vec<Option<Duration>>>()
+        .await;
 
-    while let Some(_) = set.join_next().await {}
+    // 4. Data processing and metric aggregation
+    let latencies: Vec<Duration> = stats.into_iter().flatten().collect();
+    let success_count = latencies.len();
+    let total_elapsed = start_test.elapsed();
 
-    drop(tx);
-
-    let (success_count, error_map, latencies) =
-        stats_task
-            .await
-            .map_err(|e| domain::errors::AppError::Fatal {
-                error: domain::errors::FatalError(format!(
-                    "failed to run stats_task in load test: {}",
-                    e
-                )),
-            })?;
-
-    print_report(success_count, error_map, latencies);
-
-    tracing::info!("[LoadTester] completed");
+    print_report(success_count, latencies, total_elapsed);
 
     Ok(())
 }
 
-fn print_report(
-    success: usize,
-    errors: std::collections::HashMap<u16, usize>,
-    mut latencies: Vec<std::time::Duration>,
-) {
+fn print_report(success: usize, mut latencies: Vec<std::time::Duration>, sum: Duration) {
     if latencies.is_empty() {
         println!("No data collected.");
         return;
@@ -133,7 +94,6 @@ fn print_report(
 
     latencies.sort();
     let total = latencies.len();
-    let sum: std::time::Duration = latencies.iter().sum();
     let avg = sum / total as u32;
     let p95 = latencies[(total as f64 * 0.95) as usize];
     let p99 = latencies[(total as f64 * 0.99) as usize];
@@ -151,18 +111,6 @@ fn print_report(
         Cell::new("Success (2xx)").fg(Color::Green),
         Cell::new(success.to_string()).fg(Color::Green),
     ]);
-
-    for (code, count) in errors {
-        let label = if code == 0 {
-            "Error (network)".to_string()
-        } else {
-            format!("Error ({})", code)
-        };
-        table.add_row(vec![
-            Cell::new(label).fg(Color::Red),
-            Cell::new(count.to_string()),
-        ]);
-    }
 
     table.add_row(vec![
         Cell::new("Average Latency"),

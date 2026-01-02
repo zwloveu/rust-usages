@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+
+use futures::StreamExt;
 
 use crate::domain;
 
@@ -24,49 +25,42 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> domain::TaskResult {
             // Logic 1: 100,000 tasks as a single cancelable unit
             _ = batch_interval.tick() => {
                 let start = Instant::now();
-                let mut set = JoinSet::new();
 
                 // Create a child token to manage this specific batch of tasks
                 let child_token = token.child_token();
 
                 let error_target = rand::random_range(0..=100_000);
 
-                for i in 0..=100_000 {
-                    let task_token = child_token.clone();
-                    set.spawn(async move {
-                        tokio::select! {
-                            _ = task_token.cancelled() => {
-                                // Task terminates immediately if token is cancelled
-                                Ok(())
-                            }
-                            _ = tokio::time::sleep(Duration::from_millis(1000)) => {
-                                if i % 10000 == 0 {
-                                    tracing::info!(
-                                        "[batch_task] [{}ms] | Task {} done | thread: {:?}",
-                                        start.elapsed().as_millis(),
-                                        i,
-                                        std::thread::current().id()
-                                    );
+                let task_stream = futures::stream::iter(0..=100_000)
+                        .map(|i| {
+                            let task_token = child_token.clone();
+                            tokio::spawn(async move {
+                                tokio::select! {
+                                    _ = task_token.cancelled() => Ok(()),
+                                    _ = tokio::time::sleep(Duration::from_millis(1000)) => {
+                                        if i % 10000 == 0 {
+                                            tracing::info!(
+                                                "[batch_task] [{}ms] | Task {} done | thread: {:?}",
+                                                start.elapsed().as_millis(), i, std::thread::current().id()
+                                            );
+                                        }
+                                        if i == error_target {
+                                            return Err(format!("Task {} failed manually", i));
+                                        }
+                                        Ok(())
+                                    }
                                 }
-                                if i == error_target {
-                                    return Err(format!("Task {} failed manually", i));
-                                }
-
-                                Ok(())
-                            }
-                        }
-                    });
-                }
+                            })
+                        })
+                        .buffer_unordered(5000);
 
                 // Wait for all tasks in the current batch to complete
-                while let Some(res) = set.join_next().await {
+                let mut stream = task_stream;
+                while let Some(res) = stream.next().await {
                     match res {
-                        Ok(Ok(_)) => { /* Task finished successfully */ }
-                        Ok(Err(e)) => {
-                            tracing::error!("[batch_task] Business error: {}", e);
-                        }
+                        Ok(_) => { /* Task finished successfully */ }
                         Err(e) => {
-                            tracing::error!("[batch_task] Join error (panic): {:?}", e);
+                            tracing::error!("[batch_task] Business error: {}", e);
                         }
                     }
                 }

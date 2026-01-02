@@ -9,7 +9,7 @@ pub struct ApiTestArgs {
     #[arg(short, long, default_value_t = 10)]
     pub concurrency: usize,
 
-    #[arg(short, long, default_value_t = 100)]
+    #[arg(short, long, default_value_t = 10000)]
     pub rounds: usize,
 
     #[arg(short, long, default_value_t = 1000)]

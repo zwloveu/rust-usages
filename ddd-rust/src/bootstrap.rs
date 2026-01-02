@@ -4,6 +4,11 @@ use crossbeam_channel::Sender;
 use crossbeam_channel::unbounded;
 
 use tokio_util::sync::CancellationToken;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::domain;
 use crate::infrastructure;
@@ -18,6 +23,17 @@ mod ddd_rust_sample_api_client;
 pub use ddd_rust_sample_api_client::run_ddd_rust_sample_api_client;
 
 mod worker_factories;
+
+pub fn register_tracing_subscriber() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let fmt_layer = fmt::layer()
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_line_number(true);
+
+    registry().with(filter).with(fmt_layer).init();
+}
 
 fn run(factories: Vec<domain::TaskFactory>) -> Result<(), domain::errors::AppError> {
     // 1. [Infrastructure] Create the Runtime at the very top of the stack

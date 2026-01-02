@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
 members = [
-    "bills", "ddd-rust", 
+    "bills", "ddd-rust",
     "learning"
 ]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
