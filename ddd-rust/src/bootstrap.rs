@@ -59,13 +59,13 @@ fn run(factories: Vec<domain::TaskFactory>) -> Result<(), domain::errors::AppErr
 
         thread::spawn(move || {
             // Transform this OS thread into a dedicated Runtime Worker
-            rt_handle.block_on(async {
-                if let Err(e) = infrastructure::tokio_run_internal(token, tx, all_factories).await {
-                    // This is reached if tokio_run_internal hits a Fatal error
-                    tracing::error!("[Runtime Host] Fatal error escalated: {}", e);
-                    Err(e)
-                } else {
-                    Ok(())
+            rt_handle.block_on(async move {
+                match infrastructure::tokio_run_internal(token, tx, all_factories).await {
+                    Err(e) => {
+                        tracing::error!("[Runtime Host] Fatal error escalated: {}", e);
+                        Err(e)
+                    }
+                    Ok(()) => Ok(()),
                 }
             })
         })
