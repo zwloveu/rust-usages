@@ -1,32 +1,14 @@
-use std::future::Future;
-use std::pin::Pin;
-
 use crossbeam_channel::Sender;
 
 use tokio_util::sync::CancellationToken;
 
+pub mod bootstrap;
+mod domain;
+pub use domain::{AppError, BoxedFuture, SystemEvent, TaskFactory, TaskResult};
+
 mod tokio_workers;
 pub use tokio_workers::tokio_run_internal;
 use tokio_workers::{ddd_rust_entry, start_axum_server};
-
-#[derive(thiserror::Error, Debug)]
-pub enum AppError {
-    #[error("Fatal system error: {0}")]
-    Fatal(String),
-
-    #[error("Recoverable task error: {0}")]
-    Recoverable(String),
-}
-
-pub enum SystemEvent {
-    TaskFatalError { task_name: String, error: AppError },
-    TaskRecovered { task_name: String },
-    ShutdownTriggered,
-}
-
-pub type TaskResult = Result<(), AppError>;
-pub type BoxedFuture = Pin<Box<dyn Future<Output = TaskResult> + Send>>;
-pub type TaskFactory = Box<dyn Fn(CancellationToken) -> BoxedFuture + Send>;
 
 pub fn create_axum_factory(port: u16) -> TaskFactory {
     Box::new(move |token| Box::pin(start_axum_server(token, port)))

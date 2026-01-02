@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "ddd_rust"
+name = "rd"
 path = "src/main.rs"
+
+[[bin]]
+name = "ddd_rust"
+path = "src/bin/ddd_rust.rs"
 
 [[bin]]
 name = "ddd_rust_sample_api"
