@@ -12,6 +12,6 @@ pub struct ApiTestArgs {
     #[arg(short, long, default_value_t = 100)]
     pub rounds: usize,
 
-    #[arg(short, long, default_value_t = 30)]
+    #[arg(short, long, default_value_t = 1000)]
     pub timeout: u64,
 }

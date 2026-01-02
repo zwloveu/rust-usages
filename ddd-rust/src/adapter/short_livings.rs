@@ -1,7 +1,8 @@
 use crate::domain;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use comfy_table::modifiers::UTF8_ROUND_CORNERS;
@@ -13,6 +14,7 @@ pub async fn run_load_test(
     url: String,
     concurrency: usize,
     rounds: usize,
+    timeout: u64,
 ) -> Result<(), domain::errors::AppError> {
     tracing::info!(
         "[LoadTester] Start: URL={}, Concurrency={}, Round={}",
@@ -23,19 +25,37 @@ pub async fn run_load_test(
 
     let client = reqwest::Client::builder()
         .pool_max_idle_per_host(concurrency)
+        .connect_timeout(std::time::Duration::from_millis(timeout))
         .build()
         .map_err(|e| domain::errors::AppError::Fatal {
             error: domain::errors::FatalError(format!("failed to build reqwest client: {}", e)),
         })?;
 
     let semaphore = Arc::new(Semaphore::new(concurrency));
+
+    let (tx, mut rx) = mpsc::channel(concurrency * 2);
+
+    let stats_task = tokio::spawn(async move {
+        let mut success_count = 0;
+        let mut error_map = std::collections::HashMap::new();
+        let mut latencies = Vec::new();
+
+        while let Some((status, duration)) = rx.recv().await {
+            if status >= 200 && status < 300 {
+                success_count += 1;
+                if let Some(d) = duration {
+                    latencies.push(d);
+                }
+            } else {
+                *error_map.entry(status).or_insert(0) += 1;
+            }
+        }
+        (success_count, error_map, latencies)
+    });
+
     let mut set = JoinSet::new();
 
-    let mut success_count = 0;
-    let mut error_map = std::collections::HashMap::new();
-    let mut latencies = Vec::with_capacity(rounds);
-
-    for _ in 0..rounds {
+    for i in 0..rounds {
         tokio::select! {
             _ = token.cancelled() => {
                 tracing::warn!("[LoadTester] received stop signal, aborting dispatch.");
@@ -45,54 +65,46 @@ pub async fn run_load_test(
                 let permit = permit.map_err(|e| domain::errors::AppError::Fatal{error: domain::errors::FatalError(e.to_string())})?;
                 let c = client.clone();
                 let u = url.clone();
+                let tx_clone = tx.clone();
 
                 set.spawn(async move {
                     let _permit = permit;
-                    let start = std::time::Instant::now();
-                    let res = c.get(u.as_str()).send().await;
-
+                    let start = Instant::now();
+                    let res = c.get(&u).send().await;
+                    let elapsed = start.elapsed();
 
                     match res {
                         Ok(resp) => {
-                            let (status_code, elapsed) = (resp.status().as_u16(), start.elapsed());
-
+                            let status = resp.status().as_u16();
+                            let _ = tx_clone.send((status, Some(elapsed))).await;
                             tracing::info!(
-                                            target: "load_tester_task",
-                                            url = %u,
-                                            status = status_code,
-                                            elapsed_ms = elapsed.as_millis(),
-                                            "Request processed"
-                                        );
-
-                            (status_code, elapsed)
+                                target: "load_tester_task",
+                                index = i,
+                                status = status,
+                                elapsed_ms = elapsed.as_millis(),
+                                "Request processed"
+                            );
                         },
                         Err(e) => {
-                            let elapsed = start.elapsed();
-                                        tracing::error!(
-                                            target: "load_tester_task",
-                                            url = %u,
-                                            error = %e,
-                                            elapsed_ms = elapsed.as_millis(),
-                                            "Request failed"
-                                        );
-                                        (0, elapsed)
-                        },
+                            let _ = tx_clone.send((0, None)).await;
+                            tracing::error!(
+                                target: "load_tester_task",
+                                index = i,
+                                error = %e,
+                                "Request failed"
+                            );
+                        }
                     }
                 });
             }
         }
     }
 
-    while let Some(res) = set.join_next().await {
-        if let Ok((status, duration)) = res {
-            latencies.push(duration);
-            if status >= 200 && status < 300 {
-                success_count += 1;
-            } else {
-                *error_map.entry(status).or_insert(0) += 1;
-            }
-        }
-    }
+    while let Some(_) = set.join_next().await {}
+
+    drop(tx);
+
+    let (success_count, error_map, latencies) = stats_task.await.unwrap();
 
     print_report(success_count, error_map, latencies);
     tracing::info!("[LoadTester] completed");

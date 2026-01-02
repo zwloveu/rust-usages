@@ -56,9 +56,16 @@ pub fn create_load_test_factory(
     url: String,
     concurrency: usize,
     rounds: usize,
+    timeout: u64,
 ) -> domain::TaskFactory {
     Box::new(move |token| {
         let u = url.clone();
-        Box::pin(short_livings::run_load_test(token, u, concurrency, rounds))
+        Box::pin(short_livings::run_load_test(
+            token,
+            u,
+            concurrency,
+            rounds,
+            timeout,
+        ))
     })
 }
