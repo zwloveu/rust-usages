@@ -104,9 +104,18 @@ pub async fn run_load_test(
 
     drop(tx);
 
-    let (success_count, error_map, latencies) = stats_task.await.unwrap();
+    let (success_count, error_map, latencies) =
+        stats_task
+            .await
+            .map_err(|e| domain::errors::AppError::Fatal {
+                error: domain::errors::FatalError(format!(
+                    "failed to run stats_task in load test: {}",
+                    e
+                )),
+            })?;
 
     print_report(success_count, error_map, latencies);
+
     tracing::info!("[LoadTester] completed");
 
     Ok(())
