@@ -1,27 +1,23 @@
-use axum::{Router, routing::get};
+use crate::domain;
 use tokio_util::sync::CancellationToken;
 
-use crate::{AppError, TaskResult};
-
-pub async fn start_axum_server(token: CancellationToken, port: u16) -> TaskResult {
+pub async fn start_axum_server(
+    token: CancellationToken,
+    port: u16,
+    router: axum::routing::Router,
+) -> domain::TaskResult {
     tracing::info!(
         "[axum_server] dependencies construction completed | thread :{:?}",
         std::thread::current().id()
     );
 
-    let app = Router::new()
-        .route(
-            "/",
-            get(|| async { "✅ Axum Worker is running (9527 port)" }),
-        )
-        .route("/ping", get(|| async { "pong" }));
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
-        .map_err(|e| AppError::Fatal(format!("Port {} bound failed: {}", port, e)))?;
+        .map_err(|e| domain::AppError::Fatal(format!("Port {} bound failed: {}", port, e)))?;
 
     tracing::info!("[axum_server] stars at 9527");
 
-    axum::serve(listener, app)
+    axum::serve(listener, router)
         .with_graceful_shutdown(async move {
             token.cancelled().await;
             tracing::info!("[axum_server] received cancellation signal and begin to shutdown");
@@ -30,7 +26,7 @@ pub async fn start_axum_server(token: CancellationToken, port: u16) -> TaskResul
             tracing::info!("[axum_server] shutdown completed");
         })
         .await
-        .map_err(|e| AppError::Fatal(format!("Axum runtime error: {}", e)))?;
+        .map_err(|e| domain::AppError::Fatal(format!("Axum runtime error: {}", e)))?;
 
     Ok(())
 }

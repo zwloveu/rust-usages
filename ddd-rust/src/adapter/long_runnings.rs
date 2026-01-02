@@ -4,9 +4,9 @@ use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::TaskResult;
+use crate::domain;
 
-pub async fn ddd_rust_entry(token: CancellationToken) -> TaskResult {
+pub async fn ddd_rust_entry(token: CancellationToken) -> domain::TaskResult {
     tracing::info!("[ddd_rust_entry] started");
 
     // Independent intervals for different business logic

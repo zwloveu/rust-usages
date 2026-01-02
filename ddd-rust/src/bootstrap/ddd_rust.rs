@@ -2,41 +2,27 @@ use std::thread;
 
 use crossbeam_channel::unbounded;
 
-use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    AppError, SystemEvent, TaskFactory, create_axum_factory, create_ddd_rust_entry_factory,
-    create_monitoring_factory, create_signal_handler_factory, tokio_run_internal,
-};
+use crate::bootstrap::worker_factories;
+use crate::domain;
+use crate::infrastructure;
 
-pub fn run_ddd_rust() -> Result<(), AppError> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(tracing::Level::INFO.into()),
-        )
-        .init();
-
-    tracing::info!("System is starting up...");
-
+pub fn run_ddd_rust() -> Result<(), domain::AppError> {
     // 1. [Infrastructure] Create the Runtime at the very top of the stack
     // This ensures the runtime is the last thing to be dropped
-    let rt: Runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| AppError::Fatal(e.to_string()))?;
+    let rt = infrastructure::build_tokio_runtime()?;
 
     // 2. [Communication] Initialize Crossbeam for Sync-Async bridge
-    let (event_tx, event_rx) = unbounded::<SystemEvent>();
+    let (event_tx, event_rx) = unbounded::<domain::SystemEvent>();
     let global_cancel_token = CancellationToken::new();
 
     // 3. [Task Definitions] Example: Multiple factories
-    let factories: Vec<TaskFactory> = vec![
-        create_ddd_rust_entry_factory(),
-        create_monitoring_factory(),
-        create_axum_factory(9527),
-        create_signal_handler_factory(event_tx.clone()),
+    let factories: Vec<domain::TaskFactory> = vec![
+        worker_factories::create_ddd_rust_entry_factory(),
+        worker_factories::create_monitoring_factory(),
+        worker_factories::create_axum_factory(9527),
+        worker_factories::create_signal_handler_factory(event_tx.clone()),
     ];
 
     // 4. [Execution] Spawn the Manager Thread
@@ -49,7 +35,7 @@ pub fn run_ddd_rust() -> Result<(), AppError> {
         thread::spawn(move || {
             // Transform this OS thread into a dedicated Runtime Worker
             rt_handle.block_on(async {
-                if let Err(e) = tokio_run_internal(token, tx, factories).await {
+                if let Err(e) = infrastructure::tokio_run_internal(token, tx, factories).await {
                     // This is reached if tokio_run_internal hits a Fatal error
                     tracing::error!("[Runtime Host] Fatal error escalated: {}", e);
                     Err(e)
@@ -67,12 +53,12 @@ pub fn run_ddd_rust() -> Result<(), AppError> {
             // Listen for events from the Async world
             recv(event_rx) -> event => {
                 match event {
-                    Ok(SystemEvent::TaskFatalError { task_name, error }) => {
+                    Ok(domain::SystemEvent::TaskFatalError { task_name, error }) => {
                         tracing::error!("[Main] Critical failure in {}: {}. Initiating shutdown...", task_name, error);
                         global_cancel_token.cancel();
                         break;
                     }
-                    Ok(SystemEvent::ShutdownTriggered) => break,
+                    Ok(domain::SystemEvent::ShutdownTriggered) => break,
                     _ => {}
                 }
             }

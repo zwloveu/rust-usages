@@ -2,19 +2,20 @@ use crossbeam_channel::Sender;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
-use crate::{AppError, SystemEvent, TaskFactory};
+use crate::domain;
 
-mod axum_worker;
-pub use axum_worker::start_axum_server;
-
-mod long_runnings;
-pub use long_runnings::ddd_rust_entry;
+pub fn build_tokio_runtime() -> Result<tokio::runtime::Runtime, domain::AppError> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| domain::AppError::Fatal(e.to_string()))?)
+}
 
 pub async fn tokio_run_internal(
     cancel_token: CancellationToken,
-    event_tx: Sender<SystemEvent>,
-    factories: Vec<TaskFactory>,
-) -> Result<(), AppError> {
+    event_tx: Sender<domain::SystemEvent>,
+    factories: Vec<domain::TaskFactory>,
+) -> Result<(), domain::AppError> {
     let mut set = JoinSet::new();
 
     // 1. Initialize and spawn all background tasks
@@ -36,16 +37,16 @@ pub async fn tokio_run_internal(
             Some(result) = set.join_next() => {
                 match result {
                     Ok(Ok(())) => tracing::debug!("Task completed successfully."),
-                    Ok(Err(AppError::Fatal(e))) => {
+                    Ok(Err(domain::AppError::Fatal(e))) => {
                         tracing::error!("Fatal error detected: {}. Escalating...", e);
-                        let _ = event_tx.send(SystemEvent::TaskFatalError {
+                        let _ = event_tx.send(domain::SystemEvent::TaskFatalError {
                             task_name: "Service".into(),
-                            error: AppError::Fatal(e.clone())
+                            error: domain::AppError::Fatal(e.clone())
                         });
                         cancel_token.cancel(); // Trigger ripple shutdown
                         break;
                     }
-                    Ok(Err(AppError::Recoverable(msg))) => tracing::warn!("Recoverable error: {}", msg),
+                    Ok(Err(domain::AppError::Recoverable(msg))) => tracing::warn!("Recoverable error: {}", msg),
                     Err(join_err) => {
                         if join_err.is_panic() {
                             tracing::error!("Task panic detected! Escalating...");
