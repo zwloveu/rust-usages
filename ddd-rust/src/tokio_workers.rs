@@ -7,6 +7,9 @@ use crate::{AppError, SystemEvent, TaskFactory};
 mod axum_worker;
 pub use axum_worker::start_axum_server;
 
+mod long_runnings;
+pub use long_runnings::ddd_rust_entry;
+
 pub async fn tokio_run_internal(
     cancel_token: CancellationToken,
     event_tx: Sender<SystemEvent>,
