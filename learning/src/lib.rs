@@ -5,6 +5,7 @@ use std::{
 
 mod module01_mutability_rules;
 mod module02_data_structures;
+mod module03_fp_paradigms;
 mod module09_smart_pointers;
 
 static GLOBAL_REGISTRY: OnceLock<Mutex<HashMap<&'static str, fn()>>> = OnceLock::new();
@@ -34,6 +35,11 @@ pub fn init_features() -> Result<(), Box<dyn std::error::Error>> {
 
     features.extend(
         &module02_data_structures::DataStructureHashSetModuleFeatureRegister::default()
+            .get_features(),
+    );
+
+    features.extend(
+        &module03_fp_paradigms::FunctionalProgrammingParadigmsModuleFeatureRegister::default()
             .get_features(),
     );
 
