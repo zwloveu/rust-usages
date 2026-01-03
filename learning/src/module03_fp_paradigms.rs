@@ -23,6 +23,37 @@ impl FeatureRegistry for FunctionalProgrammingParadigmsModuleFeatureRegister {
 }
 
 fn demonstrate_fp_01_iterator() {
+    struct Fib {
+        curr: u64,
+        next: u64,
+    }
+
+    impl Fib {
+        fn new() -> Self {
+            Self { curr: 0, next: 1 }
+        }
+    }
+
+    impl Iterator for Fib {
+        type Item = u64;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let current_val = self.curr;
+            let next_val = self.curr.checked_add(self.next);
+
+            match next_val {
+                Some(v) => {
+                    self.curr = self.next;
+                    self.next = v;
+
+                    Some(current_val)
+                }
+
+                None => None,
+            }
+        }
+    }
+
     let first_gt_1k = Fib::new().find(|&f| f > 1000);
     if let Some(v) = first_gt_1k {
         println!("First number > 1000 in Fib SEQ is: {:?}", v);
@@ -79,35 +110,4 @@ fn demonstrate_fp_02_closures() {
     tx_handle1.join().unwrap();
     tx_handle2.join().unwrap();
     rx_handle1.join().unwrap();
-}
-
-struct Fib {
-    curr: u64,
-    next: u64,
-}
-
-impl Fib {
-    fn new() -> Self {
-        Self { curr: 0, next: 1 }
-    }
-}
-
-impl Iterator for Fib {
-    type Item = u64;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current_val = self.curr;
-        let next_val = self.curr.checked_add(self.next);
-
-        match next_val {
-            Some(v) => {
-                self.curr = self.next;
-                self.next = v;
-
-                Some(current_val)
-            }
-
-            None => None,
-        }
-    }
 }
