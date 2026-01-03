@@ -41,6 +41,10 @@ pub fn init_features() -> Result<(), Box<dyn std::error::Error>> {
         &module09_smart_pointers::SmartPointerBoxModuleFeatureRegister::default().get_features(),
     );
 
+    features.extend(
+        &module09_smart_pointers::SmartPointerArcModuleFeatureRegister::default().get_features(),
+    );
+
     Ok(())
 }
 
