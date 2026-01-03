@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crossbeam_channel::Sender;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -16,14 +18,16 @@ pub fn build_tokio_runtime() -> Result<tokio::runtime::Runtime, domain::errors::
 pub async fn tokio_run_internal(
     cancel_token: CancellationToken,
     event_tx: Sender<domain::events::SystemEvent>,
-    factories: Vec<domain::TaskFactory>,
+    tasks: Vec<domain::TaskDefinition>,
 ) -> Result<(), domain::errors::AppError> {
     let mut set = JoinSet::new();
+    let mut task_names = HashMap::new();
 
     // 1. Initialize and spawn all background tasks
-    for factory in factories {
+    for task in tasks {
         let token = cancel_token.clone();
-        set.spawn(factory(token));
+        let handle = set.spawn((task.factory)(token));
+        task_names.insert(handle.id(), task.name);
     }
 
     // 2. Primary Event Loop (Orchestration Phase)
@@ -36,27 +40,48 @@ pub async fn tokio_run_internal(
             }
 
             // Monitor task execution status and fatal errors
-            Some(result) = set.join_next() => {
+            Some(result) = set.join_next_with_id() => {
                 match result {
-                    Ok(Ok(())) => {
-                        tracing::info!("[Orchestrator] A task completed successfully. Remaining: {}", set.len());
-                        let _ = event_tx.send(domain::events::SystemEvent::TaskCompleted {
-                            task_name: "Short-living Task".into()
-                        });
-                    },
-                    Ok(Err(domain::errors::AppError::Fatal{error})) => {
-                        tracing::error!("Fatal error detected: {}. Escalating...", error);
-                        let _ = event_tx.send(domain::events::SystemEvent::TaskFatalError {
-                            task_name: "Service".into(),
-                            error: error.clone(),
-                        });
-                        cancel_token.cancel(); // Trigger ripple shutdown
-                        break;
+                    Ok((id, task_result)) => {
+                        let task_name = task_names.remove(&id).unwrap_or_else(|| "Unknown".into());
+
+                        match task_result {
+                            Ok(()) => {
+                                tracing::info!(
+                                    task = %task_name,
+                                    "[Orchestrator] completed successfully. Remaining: {}", set.len());
+                                let _ = event_tx.send(domain::events::SystemEvent::TaskCompleted {
+                                    task_name: task_name.to_string(),
+                                });
+                            }
+
+                            Err(domain::errors::AppError::Fatal{error}) => {
+                                tracing::error!(
+                                    task = %task_name,
+                                    "Fatal error detected: {}. Escalating...", error);
+                                let _ = event_tx.send(domain::events::SystemEvent::TaskFatalError {
+                                    task_name: task_name.to_string(),
+                                    error: error.clone(),
+                                });
+                                cancel_token.cancel(); // Trigger ripple shutdown
+                                break;
+                            }
+
+                            Err(domain::errors::AppError::Recoverable{error}) => {
+                                tracing::warn!(
+                                    task = %task_name,
+                                    "Recoverable error: {}", error)
+                            }
+                        }
                     }
-                    Ok(Err(domain::errors::AppError::Recoverable{error})) => tracing::warn!("Recoverable error: {}", error),
+
                     Err(join_err) => {
+                        let id = join_err.id();
+                        let task_name = task_names.remove(&id).unwrap_or_else(|| "Unknown".into());
                         if join_err.is_panic() {
-                            tracing::error!("Task panic detected! Escalating...");
+                            tracing::error!(
+                                task = %task_name,
+                                "panic detected! Escalating...");
                             cancel_token.cancel();
                             break;
                         }

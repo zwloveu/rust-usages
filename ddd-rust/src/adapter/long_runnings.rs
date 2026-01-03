@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -7,7 +7,7 @@ use futures::StreamExt;
 
 use crate::domain;
 
-pub async fn ddd_rust_entry(token: CancellationToken) -> domain::TaskResult {
+pub async fn ddd_rust_entry(task_name: Arc<str>, token: CancellationToken) -> domain::TaskResult {
     tracing::info!("[ddd_rust_entry] started");
 
     // Independent intervals for different business logic
@@ -18,7 +18,9 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> domain::TaskResult {
         tokio::select! {
             // Global cancellation signal
             _ = token.cancelled() => {
-                tracing::info!("[ddd_rust_entry] received shutdown signal, preparing to exit");
+                tracing::info!(
+                    task = %task_name,
+                    "received shutdown signal, preparing to exit");
                 break;
             }
 
@@ -34,12 +36,21 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> domain::TaskResult {
                 let task_stream = futures::stream::iter(0..=100_000)
                         .map(|i| {
                             let task_token = child_token.clone();
+                            let task_name = Arc::clone(&task_name);
+
                             tokio::spawn(async move {
                                 tokio::select! {
-                                    _ = task_token.cancelled() => Ok(()),
+                                    _ = task_token.cancelled() => {
+                                        tracing::info!(
+                                            task = %task_name,
+                                            "[batch_task] cancelled during execution");
+                                        Ok(())
+                                    }
+
                                     _ = tokio::time::sleep(Duration::from_millis(1000)) => {
                                         if i % 10000 == 0 {
                                             tracing::info!(
+                                                task = %task_name,
                                                 "[batch_task] [{}ms] | Task {} done | thread: {:?}",
                                                 start.elapsed().as_millis(), i, std::thread::current().id()
                                             );
@@ -60,12 +71,15 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> domain::TaskResult {
                     match res {
                         Ok(_) => { /* Task finished successfully */ }
                         Err(e) => {
-                            tracing::error!("[batch_task] Business error: {}", e);
+                            tracing::error!(
+                                task = %Arc::clone(&task_name),
+                                "[batch_task] Business error: {}", e);
                         }
                     }
                 }
 
                 tracing::info!(
+                    task = %Arc::clone(&task_name),
                     "[batch_task] [{}ms] All batch tasks finished, thread: {:?}",
                     start.elapsed().as_millis(),
                     std::thread::current().id()
@@ -84,10 +98,14 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> domain::TaskResult {
                 // Wrap with select to ensure math tasks also respect the cancellation token
                 tokio::select! {
                     _ = token.cancelled() => {
-                        tracing::info!("[math_task] cancelled during execution");
+                        tracing::info!(
+                            task = %Arc::clone(&task_name),
+                            "[math_task] cancelled during execution");
                     }
+
                     results = futures::future::join_all(async_add_futures) => {
                         tracing::info!(
+                            task = %Arc::clone(&task_name),
                             "[math_task] [{}ms] results: {:?}",
                             start.elapsed().as_millis(),
                             results
@@ -98,7 +116,9 @@ pub async fn ddd_rust_entry(token: CancellationToken) -> domain::TaskResult {
         }
     }
 
-    tracing::info!("[ddd_rust_entry] dropped and cleanup finished");
+    tracing::info!(
+        task = %Arc::clone(&task_name),
+        "dropped and cleanup finished");
     Ok(())
 }
 

@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::thread;
 
 use crossbeam_channel::Sender;
@@ -35,7 +36,7 @@ pub fn register_tracing_subscriber() {
     registry().with(filter).with(fmt_layer).init();
 }
 
-fn run(factories: Vec<domain::TaskFactory>) -> Result<(), domain::errors::AppError> {
+fn run(tasks: Vec<domain::TaskDefinition>) -> Result<(), domain::errors::AppError> {
     // 1. [Infrastructure] Create the Runtime at the very top of the stack
     // This ensures the runtime is the last thing to be dropped
     let rt = infrastructure::build_tokio_runtime()?;
@@ -45,10 +46,10 @@ fn run(factories: Vec<domain::TaskFactory>) -> Result<(), domain::errors::AppErr
     let global_cancel_token = CancellationToken::new();
 
     // 3. [Task Definitions] Example: Multiple factories
-    let mut all_factories = factories;
-    all_factories.push(create_signal_handler_factory(event_tx.clone()));
+    let mut all_tasks = tasks;
+    all_tasks.push(create_signal_handler_factory(event_tx.clone()));
 
-    let mut current_active_count = all_factories.len();
+    let mut current_active_count = all_tasks.len();
 
     // 4. [Execution] Spawn the Manager Thread
     // The Runtime stays in main, the Handle goes into the thread
@@ -60,7 +61,7 @@ fn run(factories: Vec<domain::TaskFactory>) -> Result<(), domain::errors::AppErr
         thread::spawn(move || {
             // Transform this OS thread into a dedicated Runtime Worker
             rt_handle.block_on(async move {
-                match infrastructure::tokio_run_internal(token, tx, all_factories).await {
+                match infrastructure::tokio_run_internal(token, tx, all_tasks).await {
                     Err(e) => {
                         tracing::error!("[Runtime Host] Fatal error escalated: {}", e);
                         Err(e)
@@ -128,16 +129,35 @@ fn run(factories: Vec<domain::TaskFactory>) -> Result<(), domain::errors::AppErr
 
 fn create_signal_handler_factory(
     event_tx: Sender<domain::events::SystemEvent>,
-) -> domain::TaskFactory {
-    Box::new(move |_token| {
-        let tx = event_tx.clone();
-        Box::pin(async move {
-            // Tokio's built-in signal listener
-            if tokio::signal::ctrl_c().await.is_ok() {
-                tracing::info!("[Signal] Ctrl+C detected");
+) -> domain::TaskDefinition {
+    domain::TaskDefinition {
+        name: Arc::from("signal_listener"),
+        factory: Box::new(move |_token| {
+            let tx = event_tx.clone();
+            Box::pin(async move {
+                #[cfg(unix)]
+                {
+                    use tokio::signal::unix::{SignalKind, signal};
+                    let mut sigterm = signal(SignalKind::terminate())?;
+                    let mut sigint = signal(SignalKind::interrupt())?;
+
+                    tokio::select! {
+                        _ = sigterm.recv() => tracing::info!("[Signal] SIGTERM detected"),
+                        _ = sigint.recv() => tracing::info!("[Signal] SIGINT (Ctrl+C) detected"),
+                        _ = tokio::signal::ctrl_c() => tracing::info!("[Signal] Ctrl+C detected"),
+                    };
+                }
+
+                #[cfg(not(unix))]
+                {
+                    let _ = tokio::signal::ctrl_c().await;
+                    tracing::info!("[Signal] Ctrl+C detected");
+                }
+
                 let _ = tx.send(domain::events::SystemEvent::ShutdownTriggered);
-            }
-            Ok(())
-        })
-    })
+
+                Ok(())
+            })
+        }),
+    }
 }

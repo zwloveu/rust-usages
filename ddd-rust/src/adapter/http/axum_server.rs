@@ -1,13 +1,17 @@
+use std::sync::Arc;
+
 use crate::domain;
 use tokio_util::sync::CancellationToken;
 
 pub async fn start_axum_server(
+    task_name: Arc<str>,
     token: CancellationToken,
     port: u16,
     router: axum::routing::Router,
 ) -> domain::TaskResult {
     tracing::info!(
-        "[axum_server] dependencies construction completed | thread :{:?}",
+        task = %task_name,
+        "dependencies construction completed | thread :{:?}",
         std::thread::current().id()
     );
 
@@ -20,12 +24,15 @@ pub async fn start_axum_server(
     tracing::info!("[axum_server] stars at 9527");
 
     axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
-            token.cancelled().await;
-            tracing::info!("[axum_server] received cancellation signal and begin to shutdown");
-            // drop(db_conn_clone); // drop resources explicitly
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            tracing::info!("[axum_server] shutdown completed");
+        .with_graceful_shutdown({
+            let task_name = Arc::clone(&task_name);
+            async move {
+                token.cancelled().await;
+                tracing::info!(task = %task_name, "received cancellation signal and begin to shutdown");
+                // drop(db_conn_clone); // drop resources explicitly
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                tracing::info!(task = %task_name, "shutdown completed");
+            }
         })
         .await
         .map_err(|e| domain::errors::AppError::Fatal {
